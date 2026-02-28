@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, "feat/**", "fix/**"]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        run: |
+          shellcheck -S warning bin/git-doctor lib/colors.sh lib/checks.sh lib/organize.sh install.sh
+
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats-core (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+
+      - name: Install bats-core (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bats-core
+
+      - name: Run unit tests
+        run: bats tests/unit/
+
+      - name: Run integration tests
+        run: bats tests/integration/
+
+  install:
+    name: Install script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run install.sh
+        run: |
+          bash install.sh
+          # Verify binary exists and runs
+          ~/.local/bin/git-doctor --version

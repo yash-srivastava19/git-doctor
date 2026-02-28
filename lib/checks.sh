@@ -88,9 +88,9 @@ gd_branch_log() {
   local merge_base
   merge_base="$(gd_merge_base)"
   if [[ -z "$merge_base" ]]; then
-    git log --pretty=format:"%h %s" 2>/dev/null
+    git log --pretty=tformat:"%h %s" 2>/dev/null
   else
-    git log --pretty=format:"%h %s" "${merge_base}..HEAD" 2>/dev/null
+    git log --pretty=tformat:"%h %s" "${merge_base}..HEAD" 2>/dev/null
   fi
 }
 
@@ -139,7 +139,7 @@ gd_wip_count() {
   local count=0
   while IFS= read -r line; do
     local subject="${line#* }"  # strip hash prefix
-    gd_is_wip "$subject" && (( count++ ))
+    gd_is_wip "$subject" && (( ++count ))
   done < <(gd_branch_log)
   echo "$count"
 }
@@ -162,11 +162,11 @@ gd_suggest_message() {
 
   while IFS= read -r f; do
     case "$f" in
-      *test*|*spec*|*__tests__*|*.test.*|*.spec.*)  (( test_score++ )) ;;
-      *.md|*.rst|*.txt|docs/*|doc/*)                 (( doc_score++ )) ;;
-      .github/*|.circleci/*|*.yml|*.yaml|Dockerfile*|(( ci_score++ )) ;;
-      Makefile|package.json|*.toml|*.lock|setup.py)  (( build_score++ )) ;;
-      *)                                              (( src_score++ )) ;;
+      *test*|*spec*|*__tests__*|*.test.*|*.spec.*)  (( ++test_score )) ;;
+      *.md|*.rst|*.txt|docs/*|doc/*)                 (( ++doc_score )) ;;
+      .github/*|.circleci/*|*.yml|*.yaml|Dockerfile*)  (( ++ci_score )) ;;
+      Makefile|package.json|*.toml|*.lock|setup.py)  (( ++build_score )) ;;
+      *)                                              (( ++src_score )) ;;
     esac
   done <<< "$changed_files"
 
@@ -247,10 +247,10 @@ gd_message_quality_counts() {
   while IFS= read -r line; do
     local subject="${line#* }"
     case "$(gd_classify_message "$subject")" in
-      GOOD) (( good++ )) ;;
-      OK)   (( ok++ )) ;;
-      WARN) (( warn++ )) ;;
-      BAD)  (( bad++ )) ;;
+      GOOD) (( ++good )) ;;
+      OK)   (( ++ok )) ;;
+      WARN) (( ++warn )) ;;
+      BAD)  (( ++bad )) ;;
     esac
   done < <(gd_branch_log)
   echo "$good $ok $warn $bad"

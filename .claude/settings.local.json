@@ -4,7 +4,10 @@
       "Bash(git:*)",
       "Bash(chmod +x:*)",
       "Bash(bash:*)",
-      "Bash(gh repo:*)"
+      "Bash(gh repo:*)",
+      "Bash(shellcheck:*)",
+      "Bash(GD_HOME=/nonexistent NO_COLOR=1 bash:*)",
+      "Bash(BATS_LIB_PATH=/tmp/bats-core/lib /tmp/bats-core/bin/bats:*)"
     ]
   }
 }

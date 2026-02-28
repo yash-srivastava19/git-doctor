@@ -49,9 +49,9 @@ _org_infer_topic() {
   local test_count=0 doc_count=0 cfg_count=0
   while IFS= read -r f; do
     case "$f" in
-      *.test.*|*.spec.*|*_test.*|*test_*|*spec_*|*/test/*|*/tests/*|*/__tests__/*) (( test_count++ )) ;;
-      *.md|*.rst|*.txt|*/docs/*|*/doc/*)                                             (( doc_count++ )) ;;
-      *.yml|*.yaml|*.toml|*.json|*.ini|*.cfg|*.conf|Makefile|Dockerfile*)           (( cfg_count++ )) ;;
+      *.test.*|*.spec.*|*_test.*|*test_*|*spec_*|*/test/*|*/tests/*|*/__tests__/*) (( ++test_count )) ;;
+      *.md|*.rst|*.txt|*/docs/*|*/doc/*)                                             (( ++doc_count )) ;;
+      *.yml|*.yaml|*.toml|*.json|*.ini|*.cfg|*.conf|Makefile|Dockerfile*)           (( ++cfg_count )) ;;
     esac
   done <<< "$files"
 
@@ -107,7 +107,7 @@ gd_org_analyze() {
       all_is_wip+=("0")
       all_topics+=("$(_org_infer_topic "$hash" "$subject")")
     fi
-    (( commit_count++ ))
+    (( ++commit_count ))
   done < <(gd_branch_log)
 
   GD_ORG_COMMIT_COUNT="$commit_count"
@@ -235,7 +235,7 @@ _org_merge_same_topic_groups() {
       new_anchor[$new_count]="${GD_ORG_GROUP_ANCHOR[$i]}"
       new_wips[$new_count]="${GD_ORG_GROUP_WIPS[$i]}"
       new_size[$new_count]="${GD_ORG_GROUP_SIZE[$i]}"
-      (( new_count++ ))
+      (( ++new_count ))
     fi
   done
 

@@ -148,10 +148,10 @@ cmd_history() {
 
     local sym
     case "$quality" in
-      GOOD) sym="${SYM_OK}";   (( good++ )) ;;
-      OK)   sym="${SYM_INFO}"; (( ok++ )) ;;
-      WARN) sym="${SYM_WARN}"; (( warn++ )) ;;
-      BAD)  sym="${SYM_ERROR}"; (( bad++ )) ;;
+      GOOD) sym="${SYM_OK}";   (( ++good )) ;;
+      OK)   sym="${SYM_INFO}"; (( ++ok )) ;;
+      WARN) sym="${SYM_WARN}"; (( ++warn )) ;;
+      BAD)  sym="${SYM_ERROR}"; (( ++bad )) ;;
     esac
 
     # Truncate long subjects for display
@@ -290,7 +290,7 @@ cmd_history_inline() {
     fi
 
     printf "  %s ${C_DIM}%s${RESET}  %s\n" "$sym" "$hash" "$display_subject"
-    (( shown++ ))
+    (( ++shown ))
     if [[ "$shown" -ge "$max_show" ]]; then
       local remaining=$(( $(gd_branch_commit_count) - shown ))
       if [[ "$remaining" -gt 0 ]]; then
@@ -364,7 +364,7 @@ _squash_wip_only() {
     else
       echo "pick $hash $subject" >> "$todo_file"
     fi
-  done < <(gd_branch_log | tac)  # tac = reverse order for rebase todo
+  done < <(gd_branch_log | awk '{a[NR]=$0} END{while(NR)print a[NR--]}')  # reverse for rebase todo
 
   gd_dim "Rebase todo:"
   while IFS= read -r l; do gd_dim "  $l"; done < "$todo_file"
@@ -512,7 +512,7 @@ cmd_pr() {
   # Check 1: WIP commits
   if [[ "$wip" -gt 0 ]]; then
     gd_error "${wip} WIP commit(s) — run ${C_BOLD}git doctor squash${RESET} first"
-    (( issues++ ))
+    (( ++issues ))
   else
     gd_ok "No WIP commits"
   fi
@@ -534,7 +534,7 @@ cmd_pr() {
   if [[ -n "$conflict_check" ]]; then
     gd_error "Merge conflict markers detected in working tree:"
     while IFS= read -r l; do gd_dim "    $l"; done <<< "$conflict_check"
-    (( issues++ ))
+    (( ++issues ))
   else
     gd_ok "No merge conflict markers"
   fi
@@ -562,7 +562,7 @@ cmd_pr() {
 
   # Suggested PR title
   local last_good_msg
-  last_good_msg="$(gd_branch_log | head -1 | cut -d' ' -f2-)"
+  last_good_msg="$(gd_branch_log | head -1 | cut -d' ' -f2-)" || true
   local last_quality
   last_quality="$(gd_classify_message "$last_good_msg")"
 
