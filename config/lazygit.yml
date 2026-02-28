@@ -1,0 +1,30 @@
+# git-doctor lazygit integration
+# Merge this into your lazygit config file:
+#   ~/.config/lazygit/config.yml  (Linux/macOS)
+#
+# All commands open in a terminal panel so you can interact with prompts.
+
+customCommands:
+  - key: "<c-h>"
+    command: "git doctor history"
+    context: "commits"
+    output: terminal
+    description: "git-doctor: annotated history"
+
+  - key: "<c-s>"
+    command: "git doctor squash"
+    context: "commits"
+    output: terminal
+    description: "git-doctor: squash helper"
+
+  - key: "<c-p>"
+    command: "git doctor pr"
+    context: "commits"
+    output: terminal
+    description: "git-doctor: pre-PR checklist"
+
+  - key: "<c-o>"
+    command: "git doctor organize"
+    context: "commits"
+    output: terminal
+    description: "git-doctor: organize commits by topic"

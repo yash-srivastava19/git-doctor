@@ -88,9 +88,9 @@ gd_branch_log() {
   local merge_base
   merge_base="$(gd_merge_base)"
   if [[ -z "$merge_base" ]]; then
-    git log --pretty=format:"%h %s" 2>/dev/null
+    git log --pretty=tformat:"%h %s" 2>/dev/null
   else
-    git log --pretty=format:"%h %s" "${merge_base}..HEAD" 2>/dev/null
+    git log --pretty=tformat:"%h %s" "${merge_base}..HEAD" 2>/dev/null
   fi
 }
 
@@ -101,7 +101,9 @@ readonly GD_WIP_PATTERN='^(wip|fixup|squash|squash me|temp|temporary|hack|xxx|oo
 
 # Bad message: matches WIP pattern or too short
 gd_is_wip() {
-  local msg="${1,,}"  # lowercase
+  # Lowercase via tr for bash 3.2 / macOS compatibility
+  local msg
+  msg="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   msg="${msg#"${msg%%[![:space:]]*}"}"  # trim leading whitespace
   [[ "$msg" =~ $GD_WIP_PATTERN ]]
 }
@@ -139,7 +141,7 @@ gd_wip_count() {
   local count=0
   while IFS= read -r line; do
     local subject="${line#* }"  # strip hash prefix
-    gd_is_wip "$subject" && (( count++ ))
+    gd_is_wip "$subject" && (( ++count ))
   done < <(gd_branch_log)
   echo "$count"
 }
@@ -162,11 +164,11 @@ gd_suggest_message() {
 
   while IFS= read -r f; do
     case "$f" in
-      *test*|*spec*|*__tests__*|*.test.*|*.spec.*)  (( test_score++ )) ;;
-      *.md|*.rst|*.txt|docs/*|doc/*)                 (( doc_score++ )) ;;
-      .github/*|.circleci/*|*.yml|*.yaml|Dockerfile*|(( ci_score++ )) ;;
-      Makefile|package.json|*.toml|*.lock|setup.py)  (( build_score++ )) ;;
-      *)                                              (( src_score++ )) ;;
+      *test*|*spec*)  (( ++test_score )) ;;
+      *.md|*.rst|*.txt|docs/*|doc/*)                 (( ++doc_score )) ;;
+      .github/*|.circleci/*|*.yml|*.yaml|Dockerfile*)  (( ++ci_score )) ;;
+      Makefile|package.json|*.toml|*.lock|setup.py)  (( ++build_score )) ;;
+      *)                                              (( ++src_score )) ;;
     esac
   done <<< "$changed_files"
 
@@ -223,7 +225,6 @@ gd_commit_display_quality() {
 
 gd_commit_reason() {
   local subject="$1"
-  local lower_subject="${subject,,}"
   local len=${#subject}
 
   if [[ $len -lt ${GD_MIN_MSG_LENGTH:-10} ]]; then
@@ -247,10 +248,10 @@ gd_message_quality_counts() {
   while IFS= read -r line; do
     local subject="${line#* }"
     case "$(gd_classify_message "$subject")" in
-      GOOD) (( good++ )) ;;
-      OK)   (( ok++ )) ;;
-      WARN) (( warn++ )) ;;
-      BAD)  (( bad++ )) ;;
+      GOOD) (( ++good )) ;;
+      OK)   (( ++ok )) ;;
+      WARN) (( ++warn )) ;;
+      BAD)  (( ++bad )) ;;
     esac
   done < <(gd_branch_log)
   echo "$good $ok $warn $bad"

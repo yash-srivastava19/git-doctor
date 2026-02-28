@@ -22,8 +22,8 @@ printf "  ${DIM}Installing to: ${GD_HOME}${RESET}\n"
 echo ""
 
 # 1. Create directory structure
-mkdir -p "$GD_HOME/lib" "$GD_HOME/bin" "$GD_HOME/config"
-info "Created ${GD_HOME}/{lib,bin,config}"
+mkdir -p "$GD_HOME/lib" "$GD_HOME/bin" "$GD_HOME/extras"
+info "Created ${GD_HOME}/{lib,bin,extras}"
 
 # 2. Copy library files
 for lib_file in colors.sh checks.sh organize.sh; do
@@ -63,10 +63,10 @@ else
 fi
 
 # 5. Copy lazygit config example (never overwrite)
-lazygit_dest="$GD_HOME/config/lazygit.yml"
+lazygit_dest="$GD_HOME/extras/lazygit.yml"
 if [[ ! -f "$lazygit_dest" ]] && [[ -f "$SCRIPT_DIR/config/lazygit.yml" ]]; then
   cp "$SCRIPT_DIR/config/lazygit.yml" "$lazygit_dest"
-  ok "Copied config/lazygit.yml to ${lazygit_dest}"
+  ok "Copied config/lazygit.yml → ${lazygit_dest}"
 fi
 
 # 6. Symlink binary into PATH
@@ -90,4 +90,4 @@ fi
 echo ""
 bold "  Installation complete!"
 printf "  ${DIM}Try: git doctor help${RESET}\n\n"
-printf "  ${DIM}Lazygit bindings: copy %s/config/lazygit.yml content into your lazygit config.${RESET}\n\n" "$GD_HOME"
+printf "  ${DIM}Lazygit bindings: copy %s/extras/lazygit.yml content into your lazygit config.${RESET}\n\n" "$GD_HOME"
