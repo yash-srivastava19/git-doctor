@@ -5,7 +5,6 @@
 # ── Global state (parallel indexed arrays, bash 3 compatible) ────────────────
 
 GD_ORG_GROUP_COUNT=0
-GD_ORG_COMMIT_COUNT=0
 GD_ORG_MERGE_BASE=""
 
 # Indexed arrays — one entry per group
@@ -109,8 +108,6 @@ gd_org_analyze() {
     fi
     (( ++commit_count ))
   done < <(gd_branch_log)
-
-  GD_ORG_COMMIT_COUNT="$commit_count"
 
   if [[ "$commit_count" -eq 0 ]]; then
     return 1

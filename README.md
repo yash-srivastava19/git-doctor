@@ -274,7 +274,7 @@ Copy the provided config to your lazygit custom commands:
 
 ```bash
 # Append to your lazygit config (usually ~/.config/lazygit/config.yml)
-cat ~/.git-doctor/config/lazygit.yml >> ~/.config/lazygit/config.yml
+cat ~/.git-doctor/extras/lazygit.yml >> ~/.config/lazygit/config.yml
 ```
 
 This adds four bindings in the **commits panel**:

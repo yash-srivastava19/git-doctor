@@ -225,7 +225,9 @@ cmd_squash() {
   read -r choice
 
   echo ""
-  case "${choice,,}" in
+  # Lowercase via tr for bash 3.2 / macOS compatibility
+  choice="$(printf '%s' "$choice" | tr '[:upper:]' '[:lower:]')"
+  case "$choice" in
     1)
       _squash_all "$commits" "$base"
       ;;
@@ -372,8 +374,9 @@ _squash_wip_only() {
   printf "  Proceed with this rebase plan? [Y/n]: "
   read -r confirm
   confirm="${confirm:-Y}"
+  confirm="$(printf '%s' "$confirm" | tr '[:upper:]' '[:lower:]')"
 
-  if [[ "${confirm,,}" == "y" ]]; then
+  if [[ "$confirm" == "y" ]]; then
     # Use GIT_SEQUENCE_EDITOR to inject our pre-built todo
     GIT_SEQUENCE_EDITOR="cp '$todo_file' " git rebase -i "$merge_base" 2>/dev/null \
       || GIT_SEQUENCE_EDITOR="cat '$todo_file' >" git rebase -i "$merge_base"
@@ -466,8 +469,9 @@ cmd_organize() {
   printf "  Choice: "
   read -r choice
   echo ""
+  choice="$(printf '%s' "$choice" | tr '[:upper:]' '[:lower:]')"
 
-  case "${choice,,}" in
+  case "$choice" in
     1)
       gd_info "Option 1: auto-rebase"
       echo ""

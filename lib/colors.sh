@@ -2,6 +2,7 @@
 # git-doctor: terminal formatting library
 # Sourced by git-doctor CLI. All output goes to stdout (CLI tool, not hooks).
 
+# shellcheck disable=SC2034  # Variables are used by scripts that source this file
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   RED='\033[0;31m'
   YELLOW='\033[1;33m'
