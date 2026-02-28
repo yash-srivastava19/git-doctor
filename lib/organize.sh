@@ -83,7 +83,6 @@ _org_infer_topic() {
 # Returns 1 if there are no commits.
 gd_org_analyze() {
   GD_ORG_GROUP_COUNT=0
-  GD_ORG_COMMIT_COUNT=0
   GD_ORG_MERGE_BASE="$(gd_merge_base)"
   GD_ORG_GROUP_TOPIC=()
   GD_ORG_GROUP_ANCHOR=()
