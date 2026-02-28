@@ -1,0 +1,660 @@
+#!/usr/bin/env bash
+# git-doctor — git history health tool
+# Usage: git doctor [history|squash|pr|config|help] [args...]
+#
+# Installable as a git subcommand: git doctor <cmd>
+# Lazygit custom commands surface the most used operations.
+
+set -euo pipefail
+
+GD_HOME="${GD_HOME:-$HOME/.git-doctor}"
+GD_VERSION="1.1.0"
+
+# ── Bootstrap ─────────────────────────────────────────────────────────────
+
+# When invoked as 'git doctor', git passes 'doctor' as $0 in some versions.
+# Handle being called directly or as a subcommand.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source libs from installed location or relative to script for development
+if [[ -f "$GD_HOME/lib/colors.sh" ]]; then
+  source "$GD_HOME/lib/colors.sh"
+  source "$GD_HOME/lib/checks.sh"
+  source "$GD_HOME/lib/organize.sh"
+elif [[ -f "$SCRIPT_DIR/../lib/colors.sh" ]]; then
+  source "$SCRIPT_DIR/../lib/colors.sh"
+  source "$SCRIPT_DIR/../lib/checks.sh"
+  source "$SCRIPT_DIR/../lib/organize.sh"
+else
+  printf "git-doctor: cannot find lib/. Run install.sh first.\n" >&2
+  exit 1
+fi
+
+gd_load_config
+
+# ── Subcommand: help ───────────────────────────────────────────────────────
+
+cmd_help() {
+  cat <<EOF
+
+${C_BOLD}${C_MAGENTA}git-doctor${RESET} ${C_DIM}v${GD_VERSION}${RESET} — clean up your git history before PR
+
+  ${C_BOLD}USAGE${RESET}
+    git doctor               Show branch health overview
+    git doctor history       Annotated commit log with quality ratings
+    git doctor squash [N]    Interactive squash helper
+    git doctor organize      Group commits by topic, then squash/reorder
+    git doctor pr            Pre-PR checklist
+    git doctor config        Show current configuration
+    git doctor help          Show this help
+
+  ${C_BOLD}LAZYGIT${RESET} (commits panel)
+    Ctrl+H   → history       Ctrl+S   → squash
+    Ctrl+P   → pr            Ctrl+O   → organize
+
+  ${C_BOLD}PER-REPO BASE BRANCH${RESET}
+    git config gitdoctor.basebranch develop
+
+  ${C_BOLD}CONFIG${RESET}
+    ~/.git-doctor/config       Global settings
+    .git-doctor               Per-repo overrides (in repo root)
+
+EOF
+}
+
+# ── Subcommand: default (health overview) ─────────────────────────────────
+
+cmd_status() {
+  gd_require_repo
+
+  local branch base commits wip
+  branch="$(gd_current_branch)"
+  base="$(gd_base_branch)"
+  commits="$(gd_branch_commit_count)"
+  wip="$(gd_wip_count)"
+
+  gd_box "  git-doctor diagnosis  "
+  echo ""
+
+  gd_label "Branch" "${C_BOLD}${branch}${RESET} ${C_DIM}→ ${base}${RESET}"
+  gd_label "Commits" "$commits"
+
+  if [[ "$commits" -eq 0 ]]; then
+    gd_label "Status" "${C_OK}✓ nothing to squash${RESET}"
+    echo ""
+    return 0
+  fi
+
+  # WIP count with color
+  local wip_display
+  if [[ "$wip" -gt 0 ]]; then
+    wip_display="${C_WARN}${wip} ⚠${RESET} ${C_DIM}(WIP commits — squash before PR)${RESET}"
+  else
+    wip_display="${C_OK}0 ✓${RESET}"
+  fi
+  gd_label "WIP" "$wip_display"
+
+  # Quality breakdown
+  local quality_counts good ok warn bad
+  quality_counts="$(gd_message_quality_counts)"
+  read -r good ok warn bad <<< "$quality_counts"
+  local quality_display="${C_OK}${good} good${RESET}  ${C_INFO}${ok} ok${RESET}  ${C_WARN}${warn} vague${RESET}  ${C_ERROR}${bad} bad${RESET}"
+  gd_label "Quality" "$quality_display"
+
+  # Diff stats
+  local stats
+  stats="$(gd_diff_stats)"
+  gd_label "Changes" "${C_DIM}${stats}${RESET}"
+
+  echo ""
+  gd_separator
+
+  if [[ "$wip" -gt 0 ]] || [[ "$bad" -gt 0 ]]; then
+    gd_info "Run ${C_BOLD}git doctor history${RESET} to see all commits"
+    gd_info "Run ${C_BOLD}git doctor squash${RESET}  to clean up before PR"
+  else
+    gd_ok  "History looks good — run ${C_BOLD}git doctor pr${RESET} for final check"
+  fi
+  echo ""
+}
+
+# ── Subcommand: history ────────────────────────────────────────────────────
+
+cmd_history() {
+  gd_require_repo
+
+  local branch base commits
+  branch="$(gd_current_branch)"
+  base="$(gd_base_branch)"
+  commits="$(gd_branch_commit_count)"
+
+  gd_header "${commits} commits on ${C_BOLD}${branch}${RESET} since ${C_DIM}${base}${RESET}"
+
+  if [[ "$commits" -eq 0 ]]; then
+    gd_dim "No commits on this branch yet."
+    echo ""
+    return 0
+  fi
+
+  local good=0 ok=0 warn=0 bad=0
+
+  while IFS= read -r line; do
+    local hash="${line%% *}"
+    local subject="${line#* }"
+    local quality
+    quality="$(gd_classify_message "$subject")"
+    local reason
+    reason="$(gd_commit_reason "$subject")"
+
+    local sym
+    case "$quality" in
+      GOOD) sym="${SYM_OK}";   (( good++ )) ;;
+      OK)   sym="${SYM_INFO}"; (( ok++ )) ;;
+      WARN) sym="${SYM_WARN}"; (( warn++ )) ;;
+      BAD)  sym="${SYM_ERROR}"; (( bad++ )) ;;
+    esac
+
+    # Truncate long subjects for display
+    local display_subject="$subject"
+    if [[ ${#subject} -gt 52 ]]; then
+      display_subject="${subject:0:49}..."
+    fi
+
+    if [[ -n "$reason" ]]; then
+      printf "  %s ${C_DIM}%s${RESET}  %-54s ${C_DIM}← %s${RESET}\n" \
+        "$sym" "$hash" "$display_subject" "$reason"
+    else
+      printf "  %s ${C_DIM}%s${RESET}  %s\n" "$sym" "$hash" "$display_subject"
+    fi
+  done < <(gd_branch_log)
+
+  echo ""
+  gd_separator
+  printf "  ${C_DIM}Summary:${RESET}  ${C_OK}%d ✓${RESET}  ${C_INFO}%d ok${RESET}  ${C_WARN}%d ⚠${RESET}  ${C_ERROR}%d ✗${RESET}\n" \
+    "$good" "$ok" "$warn" "$bad"
+
+  local total_issues=$(( warn + bad ))
+  if [[ "$total_issues" -gt 0 ]]; then
+    echo ""
+    gd_info "Run ${C_BOLD}git doctor squash${RESET} to consolidate these commits."
+  fi
+  echo ""
+}
+
+# ── Subcommand: squash ─────────────────────────────────────────────────────
+
+cmd_squash() {
+  gd_require_repo
+
+  # If N given directly, jump straight to rebase
+  if [[ -n "${1:-}" ]] && [[ "$1" =~ ^[0-9]+$ ]]; then
+    local n="$1"
+    gd_header "Squashing last ${n} commits"
+    gd_info "Opening interactive rebase for HEAD~${n}..."
+    echo ""
+    exec git rebase -i "HEAD~${n}"
+  fi
+
+  local branch base commits wip
+  branch="$(gd_current_branch)"
+  base="$(gd_base_branch)"
+  commits="$(gd_branch_commit_count)"
+  wip="$(gd_wip_count)"
+
+  if [[ "$commits" -eq 0 ]]; then
+    gd_header "Nothing to squash"
+    gd_dim "No commits on this branch vs ${base}."
+    echo ""
+    return 0
+  fi
+
+  gd_header "${commits} commits on ${C_BOLD}${branch}${RESET} since ${C_DIM}${base}${RESET} (${wip} WIP)"
+  cmd_history_inline
+
+  echo ""
+  printf "  ${C_BOLD}How would you like to squash?${RESET}\n\n"
+  printf "  ${C_DIM}[1]${RESET} Squash ALL %d into one clean commit  ${C_DIM}← clean slate${RESET}\n" "$commits"
+  if [[ "$wip" -gt 0 ]]; then
+    printf "  ${C_DIM}[2]${RESET} Auto-squash %d WIP commits into neighbors  ${C_DIM}← keep meaningful ones${RESET}\n" "$wip"
+  fi
+  printf "  ${C_DIM}[3]${RESET} Full interactive rebase                ${C_DIM}← you decide everything${RESET}\n"
+  printf "  ${C_DIM}[4]${RESET} Squash last N commits  ${C_DIM}(enter N)${RESET}\n"
+  printf "  ${C_DIM}[q]${RESET} Cancel\n"
+  echo ""
+  printf "  Choice: "
+  read -r choice
+
+  echo ""
+  case "${choice,,}" in
+    1)
+      _squash_all "$commits" "$base"
+      ;;
+    2)
+      if [[ "$wip" -eq 0 ]]; then
+        gd_warn "No WIP commits detected. Use option 1 or 3."
+      else
+        _squash_wip_only "$base"
+      fi
+      ;;
+    3)
+      local merge_base
+      merge_base="$(gd_merge_base)"
+      gd_info "Opening full interactive rebase..."
+      echo ""
+      exec git rebase -i "$merge_base"
+      ;;
+    4)
+      printf "  Squash last N commits — enter N: "
+      read -r n
+      if [[ "$n" =~ ^[0-9]+$ && "$n" -gt 0 ]]; then
+        gd_info "Opening interactive rebase for HEAD~${n}..."
+        echo ""
+        exec git rebase -i "HEAD~${n}"
+      else
+        gd_error "Invalid number."
+        exit 1
+      fi
+      ;;
+    q|Q|"")
+      gd_dim "Cancelled."
+      echo ""
+      ;;
+    *)
+      gd_error "Invalid choice: ${choice}"
+      exit 1
+      ;;
+  esac
+}
+
+# Inline (compact) history for squash menu context
+cmd_history_inline() {
+  local shown=0
+  local max_show=8
+  while IFS= read -r line; do
+    local hash="${line%% *}"
+    local subject="${line#* }"
+    local quality
+    quality="$(gd_classify_message "$subject")"
+
+    local sym
+    case "$quality" in
+      GOOD) sym="${SYM_OK}" ;;
+      OK)   sym="${SYM_INFO}" ;;
+      WARN) sym="${SYM_WARN}" ;;
+      BAD)  sym="${SYM_ERROR}" ;;
+    esac
+
+    local display_subject="$subject"
+    if [[ ${#subject} -gt 56 ]]; then
+      display_subject="${subject:0:53}..."
+    fi
+
+    printf "  %s ${C_DIM}%s${RESET}  %s\n" "$sym" "$hash" "$display_subject"
+    (( shown++ ))
+    if [[ "$shown" -ge "$max_show" ]]; then
+      local remaining=$(( $(gd_branch_commit_count) - shown ))
+      if [[ "$remaining" -gt 0 ]]; then
+        gd_dim "  ... and ${remaining} more"
+      fi
+      break
+    fi
+  done < <(gd_branch_log)
+}
+
+_squash_all() {
+  local commits="$1"
+  local base="$2"
+  local merge_base
+  merge_base="$(gd_merge_base)"
+
+  gd_info "Squashing all ${commits} commits into one..."
+  gd_dim  "Using: git reset --soft ${merge_base:0:8}"
+  echo ""
+
+  # Get suggested message before reset (we'll still have the diff)
+  local suggested
+  suggested="$(gd_suggest_message)"
+
+  # Soft reset — keeps all changes staged
+  git reset --soft "$merge_base"
+
+  echo ""
+  printf "  ${C_BOLD}Enter commit message${RESET} ${C_DIM}(empty = use suggestion):${RESET}\n"
+  gd_dim  "  Suggested: ${suggested}"
+  echo ""
+  printf "  > "
+  read -r user_message
+
+  local final_message="${user_message:-$suggested}"
+
+  if [[ -z "$final_message" || "$final_message" == "$suggested" && "$suggested" == *"<describe"* ]]; then
+    gd_warn "Please enter a meaningful commit message."
+    printf "  > "
+    read -r final_message
+    if [[ -z "$final_message" ]]; then
+      gd_error "No commit message provided. Aborting."
+      gd_dim   "Your changes are still staged (git reset --soft was done)."
+      exit 1
+    fi
+  fi
+
+  git commit -m "$final_message"
+  echo ""
+  gd_ok "Squashed into: ${C_BOLD}${final_message}${RESET}"
+  echo ""
+}
+
+_squash_wip_only() {
+  local base="$1"
+  local merge_base
+  merge_base="$(gd_merge_base)"
+
+  gd_info "Generating rebase todo with WIP commits marked as fixup..."
+  echo ""
+
+  # Generate the rebase todo: pick for good commits, fixup for WIP
+  local todo_file
+  todo_file="$(mktemp /tmp/git-doctor-todo.XXXXXX)"
+
+  while IFS= read -r line; do
+    local hash="${line%% *}"
+    local subject="${line#* }"
+    if gd_is_wip "$subject"; then
+      echo "fixup $hash $subject" >> "$todo_file"
+    else
+      echo "pick $hash $subject" >> "$todo_file"
+    fi
+  done < <(gd_branch_log | tac)  # tac = reverse order for rebase todo
+
+  gd_dim "Rebase todo:"
+  while IFS= read -r l; do gd_dim "  $l"; done < "$todo_file"
+  echo ""
+  printf "  Proceed with this rebase plan? [Y/n]: "
+  read -r confirm
+  confirm="${confirm:-Y}"
+
+  if [[ "${confirm,,}" == "y" ]]; then
+    # Use GIT_SEQUENCE_EDITOR to inject our pre-built todo
+    GIT_SEQUENCE_EDITOR="cp '$todo_file' " git rebase -i "$merge_base" 2>/dev/null \
+      || GIT_SEQUENCE_EDITOR="cat '$todo_file' >" git rebase -i "$merge_base"
+    rm -f "$todo_file"
+    echo ""
+    gd_ok "WIP commits squashed into their neighbors."
+  else
+    rm -f "$todo_file"
+    gd_dim "Cancelled."
+  fi
+  echo ""
+}
+
+# ── Subcommand: organize ───────────────────────────────────────────────────
+
+cmd_organize() {
+  gd_require_repo
+
+  # Guard: rebase or merge already in progress
+  local git_dir
+  git_dir="$(git rev-parse --git-dir 2>/dev/null)"
+  if [[ -d "$git_dir/rebase-merge" || -d "$git_dir/rebase-apply" ]]; then
+    gd_error "A rebase is already in progress."
+    gd_dim   "Finish it first: git rebase --continue  (or --abort)"
+    echo ""
+    exit 1
+  fi
+  if [[ -f "$git_dir/MERGE_HEAD" ]]; then
+    gd_error "A merge is in progress — resolve it first."
+    echo ""
+    exit 1
+  fi
+
+  # Guard: protected branch
+  local branch
+  branch="$(gd_current_branch)"
+  for pb in $GD_PROTECTED_BRANCHES; do
+    if [[ "$branch" == "$pb" ]]; then
+      gd_error "Cannot organize commits on protected branch '${branch}'."
+      gd_dim   "Check out a feature branch first."
+      echo ""
+      exit 1
+    fi
+  done
+
+  local commits
+  commits="$(gd_branch_commit_count)"
+
+  gd_header "Organize commits on ${C_BOLD}${branch}${RESET}"
+
+  # Edge: nothing to do
+  if [[ "$commits" -eq 0 ]]; then
+    gd_dim "No commits on this branch yet — nothing to organize."
+    echo ""
+    return 0
+  fi
+
+  # Edge: single commit — suggest squash instead
+  if [[ "$commits" -eq 1 ]]; then
+    gd_info "Only 1 commit on this branch."
+    gd_dim  "Use ${C_BOLD}git doctor squash${RESET} to edit its message, or just keep it."
+    echo ""
+    return 0
+  fi
+
+  # Analyze
+  gd_dim "Analyzing ${commits} commits..."
+  echo ""
+
+  if ! gd_org_analyze; then
+    gd_dim "Nothing to organize."
+    echo ""
+    return 0
+  fi
+
+  # Show before state
+  gd_org_display_before
+
+  # Show proposed groups
+  gd_org_display_groups
+
+  gd_separator
+  echo ""
+  printf "  ${C_BOLD}What would you like to do?${RESET}\n\n"
+  printf "  ${C_DIM}[1]${RESET} Apply this plan              ${C_DIM}← auto-rebase, no editor${RESET}\n"
+  printf "  ${C_DIM}[2]${RESET} Review & edit the rebase todo ${C_DIM}← opens in \$EDITOR${RESET}\n"
+  printf "  ${C_DIM}[3]${RESET} Guided re-commit             ${C_DIM}← soft reset, commit group by group${RESET}\n"
+  printf "  ${C_DIM}[q]${RESET} Cancel\n"
+  echo ""
+  printf "  Choice: "
+  read -r choice
+  echo ""
+
+  case "${choice,,}" in
+    1)
+      gd_info "Option 1: auto-rebase"
+      echo ""
+      gd_org_auto_rebase
+      ;;
+    2)
+      gd_info "Option 2: edit rebase todo"
+      echo ""
+      gd_org_edit_rebase
+      ;;
+    3)
+      gd_info "Option 3: guided re-commit"
+      echo ""
+      gd_org_guided_recommit
+      ;;
+    q|Q|"")
+      gd_dim "Cancelled."
+      echo ""
+      ;;
+    *)
+      gd_error "Invalid choice: ${choice}"
+      exit 1
+      ;;
+  esac
+}
+
+# ── Subcommand: pr ─────────────────────────────────────────────────────────
+
+cmd_pr() {
+  gd_require_repo
+
+  local branch base commits wip
+  branch="$(gd_current_branch)"
+  base="$(gd_base_branch)"
+  commits="$(gd_branch_commit_count)"
+  wip="$(gd_wip_count)"
+
+  gd_header "Pre-PR check: ${C_BOLD}${branch}${RESET} ${C_DIM}→ ${base}${RESET}"
+
+  local issues=0
+
+  # Check 1: WIP commits
+  if [[ "$wip" -gt 0 ]]; then
+    gd_error "${wip} WIP commit(s) — run ${C_BOLD}git doctor squash${RESET} first"
+    (( issues++ ))
+  else
+    gd_ok "No WIP commits"
+  fi
+
+  # Check 2: Bad/vague commit messages
+  local quality_counts good ok warn bad
+  quality_counts="$(gd_message_quality_counts)"
+  read -r good ok warn bad <<< "$quality_counts"
+  local bad_total=$(( warn + bad ))
+  if [[ "$bad_total" -gt 0 ]]; then
+    gd_warn "${bad_total} commit(s) with vague messages  ${C_DIM}(run 'git doctor history')${RESET}"
+  else
+    gd_ok "Commit messages look descriptive"
+  fi
+
+  # Check 3: Merge conflict markers
+  local conflict_check
+  conflict_check="$(git diff --check 2>&1)" || true
+  if [[ -n "$conflict_check" ]]; then
+    gd_error "Merge conflict markers detected in working tree:"
+    while IFS= read -r l; do gd_dim "    $l"; done <<< "$conflict_check"
+    (( issues++ ))
+  else
+    gd_ok "No merge conflict markers"
+  fi
+
+  # Check 4: Up to date with base (only if remote exists)
+  if git remote get-url origin &>/dev/null; then
+    local behind
+    behind="$(git rev-list "HEAD..origin/${base}" --count 2>/dev/null || echo "?")"
+    if [[ "$behind" == "?" ]]; then
+      gd_dim "Could not check if up to date with origin/${base}"
+    elif [[ "$behind" -gt 0 ]]; then
+      gd_warn "Branch is ${behind} commit(s) behind origin/${base}"
+      gd_dim  "  Consider: git pull --rebase origin ${base}"
+    else
+      gd_ok "Up to date with origin/${base}"
+    fi
+  fi
+
+  # Summary stats
+  echo ""
+  gd_separator
+  local stats
+  stats="$(gd_diff_stats)"
+  gd_label "Changed" "${C_DIM}${stats}${RESET}"
+
+  # Suggested PR title
+  local last_good_msg
+  last_good_msg="$(gd_branch_log | head -1 | cut -d' ' -f2-)"
+  local last_quality
+  last_quality="$(gd_classify_message "$last_good_msg")"
+
+  if [[ "$last_quality" == "GOOD" ]]; then
+    gd_label "PR title" "${C_OK}${last_good_msg}${RESET}"
+  else
+    local suggested
+    suggested="$(gd_suggest_message)"
+    gd_label "PR title" "${C_DIM}${suggested}${RESET} ${C_WARN}(suggested)${RESET}"
+  fi
+
+  echo ""
+  if [[ "$issues" -eq 0 ]]; then
+    gd_ok "${C_BOLD}Ready for PR!${RESET}"
+  else
+    gd_error "NOT READY — ${issues} issue(s) to fix"
+  fi
+  echo ""
+}
+
+# ── Subcommand: config ─────────────────────────────────────────────────────
+
+cmd_config() {
+  gd_header "Configuration"
+
+  local config_file="$GD_HOME/config"
+  gd_label "Global" "${C_DIM}${config_file}${RESET}"
+
+  local repo_config=""
+  local repo_root
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ -n "$repo_root" && -f "$repo_root/.git-doctor" ]]; then
+    repo_config="$repo_root/.git-doctor"
+    gd_label "Repo" "${C_DIM}${repo_config}${RESET}"
+  fi
+
+  echo ""
+  gd_label "GD_WIP_THRESHOLD" "${GD_WIP_THRESHOLD}"
+  gd_label "GD_MIN_MSG_LEN"   "${GD_MIN_MSG_LENGTH}"
+  gd_label "GD_PROTECTED"     "${GD_PROTECTED_BRANCHES}"
+
+  local base=""
+  base="$(git config gitdoctor.basebranch 2>/dev/null || true)"
+  if [[ -n "$base" ]]; then
+    gd_label "Base branch"  "${C_OK}${base}${RESET} ${C_DIM}(per-repo override)${RESET}"
+  else
+    gd_label "Base branch"  "${C_DIM}auto-detect${RESET}"
+  fi
+
+  echo ""
+  gd_dim "Set per-repo base: git config gitdoctor.basebranch <branch>"
+  gd_dim "Per-repo overrides: .git-doctor file in repo root"
+  echo ""
+}
+
+# ── Dispatch ───────────────────────────────────────────────────────────────
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+
+  case "$cmd" in
+    ""|status|diagnose|check)
+      cmd_status
+      ;;
+    history|log|h)
+      cmd_history
+      ;;
+    squash|s)
+      cmd_squash "${1:-}"
+      ;;
+    organize|org|o)
+      cmd_organize
+      ;;
+    pr|review)
+      cmd_pr
+      ;;
+    config|conf)
+      cmd_config
+      ;;
+    help|--help|-h)
+      cmd_help
+      ;;
+    version|--version|-v)
+      printf "git-doctor v%s\n" "$GD_VERSION"
+      ;;
+    *)
+      gd_error "Unknown command: ${cmd}"
+      cmd_help
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
